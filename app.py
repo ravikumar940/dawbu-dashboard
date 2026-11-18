@@ -16,6 +16,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+import shopify_data
+
 # ---------------------------------------------------------------------------
 # COLORS - change these to Dawbu's brand colors if you want
 # ---------------------------------------------------------------------------
@@ -87,9 +89,19 @@ def check_columns(df, needed, name):
 # Sidebar - data + settings
 # ---------------------------------------------------------------------------
 st.sidebar.header("📂 Data")
-sales_file = st.sidebar.file_uploader("Sales CSV (date, product, units_sold, price)", type="csv")
-stock_file = st.sidebar.file_uploader("Inventory CSV (product, current_stock)", type="csv")
-st.sidebar.caption("No upload? The app uses the files in the `data/` folder.")
+sources = (["🛍️ Shopify (live)"] if shopify_data.is_configured() else []) + ["📄 CSV files"]
+source = st.sidebar.radio("Data source", sources)
+sales_file = stock_file = None
+if source.startswith("📄"):
+    sales_file = st.sidebar.file_uploader("Sales CSV (date, product, units_sold, price)", type="csv")
+    stock_file = st.sidebar.file_uploader("Inventory CSV (product, current_stock)", type="csv")
+    st.sidebar.caption("No upload? The app uses the sample CSV files in the repo.")
+    if not shopify_data.is_configured():
+        st.sidebar.info("Shopify is not connected yet. Add the SHOPIFY_* settings in Render → Environment.")
+else:
+    if st.sidebar.button("🔄 Refresh Shopify data"):
+        st.cache_data.clear()
+    st.sidebar.caption("Shopify data is refreshed automatically every hour.")
 
 st.sidebar.header("⚙️ Settings")
 lead_time = st.sidebar.slider(
@@ -101,8 +113,26 @@ top_n = st.sidebar.slider("Products to show in charts", 5, 30, 10)
 # ---------------------------------------------------------------------------
 # Load data
 # ---------------------------------------------------------------------------
-sales = check_columns(read_csv(sales_file, "data/sales.csv"), ["date", "product", "units_sold"], "Sales CSV")
-stock = check_columns(read_csv(stock_file, "data/inventory.csv"), ["product", "current_stock"], "Inventory CSV")
+@st.cache_data(ttl=3600, show_spinner="Fetching orders and stock from Shopify…")
+def load_shopify():
+    return shopify_data.fetch(days=30)
+
+
+if source.startswith("🛍️"):
+    try:
+        sales, stock = load_shopify()
+    except Exception as err:  # show the reason on screen instead of crashing
+        st.error(f"Could not load data from Shopify.\n\n{err}")
+        st.stop()
+    if sales.empty:
+        st.warning("No Shopify orders found in the last 30 days.")
+        st.stop()
+else:
+    sales = read_csv(sales_file, "data/sales.csv")
+    stock = read_csv(stock_file, "data/inventory.csv")
+
+sales = check_columns(sales, ["date", "product", "units_sold"], "Sales data")
+stock = check_columns(stock, ["product", "current_stock"], "Inventory data")
 
 sales["date"] = pd.to_datetime(sales["date"], errors="coerce")
 sales = sales.dropna(subset=["date"])
