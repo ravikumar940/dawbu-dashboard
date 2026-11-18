@@ -9,6 +9,7 @@ You can also upload new CSV files from the sidebar while the app is running.
 """
 
 from datetime import timedelta
+from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
@@ -61,9 +62,15 @@ def style_chart(fig, height=420):
 
 
 def read_csv(uploaded, default_path):
+    """Use the uploaded file, else data/<name>.csv, else <name>.csv next to app.py."""
     if uploaded is not None:
         return pd.read_csv(uploaded)
-    return pd.read_csv(default_path)
+    here = Path(__file__).parent
+    for candidate in (here / default_path, here / Path(default_path).name):
+        if candidate.exists():
+            return pd.read_csv(candidate)
+    st.error(f"Could not find {Path(default_path).name}. Upload it from the sidebar or add it to GitHub.")
+    st.stop()
 
 
 def check_columns(df, needed, name):
